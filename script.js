@@ -1,281 +1,146 @@
-/* ===========================================================
-   BlockNotes
-   A simple notes app themed around blockchain concepts.
+// BlockNotes - a simple notes app
+// Each note is called a "block" and has a hash based on its content.
 
-   Each note is a "block" containing:
-     - index       (its position in the chain)
-     - title, body (the actual note content)
-     - timestamp   (when it was created/edited)
-     - prevHash    (hash of the block before it)
-     - hash        (this block's own "hash")
+// Load saved notes from the browser, or start with an empty list
+let notes = JSON.parse(localStorage.getItem("notes")) || [];
 
-   This is NOT a real blockchain (no mining difficulty, no
-   network, no real cryptography) — it's a learning project
-   that borrows the chain-of-blocks idea to make a notes app
-   more fun to build and look at.
-   =========================================================== */
+// Get references to the HTML elements we need
+const noteTitle = document.getElementById("noteTitle");
+const noteBody = document.getElementById("noteBody");
+const addBtn = document.getElementById("addBtn");
+const notesList = document.getElementById("notesList");
+const noteCount = document.getElementById("noteCount");
+const emptyMessage = document.getElementById("emptyMessage");
+const searchInput = document.getElementById("searchInput");
 
-const STORAGE_KEY = 'blocknotes_chain';
+const editBox = document.getElementById("editBox");
+const editTitle = document.getElementById("editTitle");
+const editBody = document.getElementById("editBody");
+const saveEditBtn = document.getElementById("saveEditBtn");
+const cancelEditBtn = document.getElementById("cancelEditBtn");
 
-let chain = loadChain();
+let editingIndex = null; // keeps track of which note is being edited
 
-// ---- DOM references ----
-const chainContainer = document.getElementById('chainContainer');
-const emptyState = document.getElementById('emptyState');
-const chainLengthEl = document.getElementById('chainLength');
-const noteTitleInput = document.getElementById('noteTitle');
-const noteBodyInput = document.getElementById('noteBody');
-const charHint = document.getElementById('charHint');
-const mineBtn = document.getElementById('mineBtn');
-const searchInput = document.getElementById('searchInput');
+// Show the notes on the page when it first loads
+showNotes(notes);
 
-const editModal = document.getElementById('editModal');
-const editTitleInput = document.getElementById('editTitle');
-const editBodyInput = document.getElementById('editBody');
-const saveEditBtn = document.getElementById('saveEdit');
-const cancelEditBtn = document.getElementById('cancelEdit');
-
-let editingId = null; // tracks which block is currently being edited
-
-// ---- Init ----
-render(chain);
-
-/* ===========================================================
-   Hashing
-   A tiny, fast, NON-cryptographic hash just to give each block
-   a believable-looking fingerprint. Good enough for a demo —
-   do not use this for anything that needs real security.
-   =========================================================== */
-function fakeHash(input) {
+// Makes a simple fake "hash" string from the note's text.
+// This is NOT a real secure hash, just for the blockchain theme.
+function makeHash(text) {
   let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0; // keep it a 32-bit int
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 31 + text.charCodeAt(i)) % 1000000;
   }
-  // turn it into a hex-looking string and pad it out
-  const hex = Math.abs(hash).toString(16).padStart(8, '0');
-  return (hex + hex).slice(0, 16);
+  return hash.toString(16); // turn it into letters/numbers
 }
 
-function computeBlockHash(block) {
-  const payload = `${block.index}|${block.title}|${block.body}|${block.timestamp}|${block.prevHash}`;
-  return fakeHash(payload);
+// Save the notes array into the browser's storage
+function saveNotes() {
+  localStorage.setItem("notes", JSON.stringify(notes));
 }
 
-/* ===========================================================
-   Storage
-   =========================================================== */
-function loadChain() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (err) {
-    console.error('Could not read saved notes:', err);
-    return [];
-  }
-}
-
-function saveChain() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(chain));
-}
-
-/* ===========================================================
-   Chain operations
-   =========================================================== */
-function mineBlock(title, body) {
-  const prevBlock = chain[chain.length - 1];
-  const prevHash = prevBlock ? prevBlock.hash : '0'.repeat(16);
-
-  const block = {
-    id: crypto.randomUUID(),
-    index: chain.length,
-    title: title.trim() || 'Untitled block',
-    body: body.trim(),
-    timestamp: Date.now(),
-    prevHash,
-    hash: '' // filled in below
-  };
-
-  block.hash = computeBlockHash(block);
-  chain.push(block);
-  saveChain();
-  render(chain);
-}
-
-function deleteBlock(id) {
-  chain = chain.filter(b => b.id !== id);
-  // re-index and re-link the remaining blocks so the chain stays valid
-  relinkChain();
-}
-
-function updateBlock(id, newTitle, newBody) {
-  const block = chain.find(b => b.id === id);
-  if (!block) return;
-
-  block.title = newTitle.trim() || 'Untitled block';
-  block.body = newBody.trim();
-  block.timestamp = Date.now();
-  block.hash = computeBlockHash(block);
-
-  relinkChain(); // changing this block's hash means everything after it must relink
-}
-
-function relinkChain() {
-  chain.forEach((block, i) => {
-    block.index = i;
-    block.prevHash = i === 0 ? '0'.repeat(16) : chain[i - 1].hash;
-    block.hash = computeBlockHash(block);
-  });
-  saveChain();
-  render(chain);
-}
-
-/* ===========================================================
-   Rendering
-   =========================================================== */
-function render(list) {
-  chainLengthEl.textContent = chain.length;
-  chainContainer.innerHTML = '';
+// Show a list of notes on the page
+function showNotes(list) {
+  notesList.innerHTML = ""; // clear what's currently shown
+  noteCount.textContent = notes.length;
 
   if (list.length === 0) {
-    emptyState.classList.remove('hidden');
-    return;
+    emptyMessage.classList.remove("hidden");
+  } else {
+    emptyMessage.classList.add("hidden");
   }
-  emptyState.classList.add('hidden');
 
-  list.forEach((block, i) => {
-    if (i > 0) {
-      chainContainer.appendChild(makeLinkEl());
-    }
-    chainContainer.appendChild(makeBlockEl(block));
-  });
-}
+  list.forEach((note, index) => {
+    const block = document.createElement("div");
+    block.className = "note-block";
 
-function makeLinkEl() {
-  const link = document.createElement('div');
-  link.className = 'chain-link';
-  return link;
-}
-
-function makeBlockEl(block) {
-  const el = document.createElement('article');
-  el.className = 'block';
-
-  const date = new Date(block.timestamp);
-  const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const timeStr = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-
-  el.innerHTML = `
-    <div class="block-header">
-      <h3 class="block-title"></h3>
-      <span class="block-index">#${block.index}</span>
-    </div>
-    <p class="block-body"></p>
-    <div class="block-meta">
-      <span class="block-hash">${dateStr} · ${timeStr} · <span class="hash-bright">${block.hash}</span></span>
-      <div class="block-actions">
+    block.innerHTML = `
+      <p class="note-title"></p>
+      <p class="note-body"></p>
+      <p class="note-hash">Block #${index} - hash: ${note.hash}</p>
+      <div class="note-actions">
         <button class="edit-btn">Edit</button>
-        <button class="danger delete-btn">Delete</button>
+        <button class="delete-btn">Delete</button>
       </div>
-    </div>
-  `;
+    `;
 
-  // set text content via textContent (not innerHTML) to avoid any HTML/script injection
-  el.querySelector('.block-title').textContent = block.title;
-  el.querySelector('.block-body').textContent = block.body || '(no content)';
+    // Use textContent so any text the user types is shown safely
+    block.querySelector(".note-title").textContent = note.title;
+    block.querySelector(".note-body").textContent = note.body;
 
-  el.querySelector('.edit-btn').addEventListener('click', () => openEditModal(block));
-  el.querySelector('.delete-btn').addEventListener('click', () => {
-    if (confirm(`Delete block #${block.index} — "${block.title}"? This can't be undone.`)) {
-      deleteBlock(block.id);
-    }
+    // When Edit is clicked, open the edit box for this note
+    block.querySelector(".edit-btn").addEventListener("click", () => {
+      openEditBox(index);
+    });
+
+    // When Delete is clicked, remove this note
+    block.querySelector(".delete-btn").addEventListener("click", () => {
+      notes.splice(index, 1);
+      saveNotes();
+      showNotes(notes);
+    });
+
+    notesList.appendChild(block);
   });
-
-  return el;
 }
 
-/* ===========================================================
-   Mining (creating a new note)
-   =========================================================== */
-mineBtn.addEventListener('click', () => {
-  const title = noteTitleInput.value;
-  const body = noteBodyInput.value;
+// Add a new note when the button is clicked
+addBtn.addEventListener("click", () => {
+  const title = noteTitle.value.trim();
+  const body = noteBody.value.trim();
 
-  if (!title.trim() && !body.trim()) {
-    noteTitleInput.focus();
-    return;
+  if (title === "" && body === "") {
+    return; // don't add an empty note
   }
 
-  mineBlock(title, body);
-  noteTitleInput.value = '';
-  noteBodyInput.value = '';
-  updateCharHint();
-  noteTitleInput.focus();
+  const newNote = {
+    title: title || "Untitled",
+    body: body,
+    hash: makeHash(title + body + Date.now())
+  };
+
+  notes.push(newNote);
+  saveNotes();
+  showNotes(notes);
+
+  // clear the form
+  noteTitle.value = "";
+  noteBody.value = "";
 });
 
-// Allow Ctrl/Cmd + Enter to mine quickly from the textarea
-noteBodyInput.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    mineBtn.click();
-  }
-});
-
-function updateCharHint() {
-  charHint.textContent = `${noteBodyInput.value.length} / 1000`;
-}
-noteBodyInput.addEventListener('input', updateCharHint);
-noteBodyInput.setAttribute('maxlength', '1000');
-
-/* ===========================================================
-   Editing
-   =========================================================== */
-function openEditModal(block) {
-  editingId = block.id;
-  editTitleInput.value = block.title;
-  editBodyInput.value = block.body;
-  editModal.classList.remove('hidden');
-  editTitleInput.focus();
+// Open the edit box and fill it with the note's current info
+function openEditBox(index) {
+  editingIndex = index;
+  editTitle.value = notes[index].title;
+  editBody.value = notes[index].body;
+  editBox.classList.remove("hidden");
 }
 
-function closeEditModal() {
-  editingId = null;
-  editModal.classList.add('hidden');
-}
+// Save changes made in the edit box
+saveEditBtn.addEventListener("click", () => {
+  const note = notes[editingIndex];
+  note.title = editTitle.value.trim() || "Untitled";
+  note.body = editBody.value.trim();
+  note.hash = makeHash(note.title + note.body + Date.now());
 
-saveEditBtn.addEventListener('click', () => {
-  if (editingId) {
-    updateBlock(editingId, editTitleInput.value, editBodyInput.value);
-  }
-  closeEditModal();
+  saveNotes();
+  showNotes(notes);
+  editBox.classList.add("hidden");
 });
 
-cancelEditBtn.addEventListener('click', closeEditModal);
-
-editModal.addEventListener('click', (e) => {
-  if (e.target === editModal) closeEditModal();
+// Close the edit box without saving
+cancelEditBtn.addEventListener("click", () => {
+  editBox.classList.add("hidden");
 });
 
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !editModal.classList.contains('hidden')) {
-    closeEditModal();
-  }
-});
+// Search/filter notes as the user types
+searchInput.addEventListener("input", () => {
+  const query = searchInput.value.toLowerCase();
 
-/* ===========================================================
-   Search / filter
-   =========================================================== */
-searchInput.addEventListener('input', () => {
-  const query = searchInput.value.trim().toLowerCase();
-
-  if (!query) {
-    render(chain);
-    return;
-  }
-
-  const filtered = chain.filter(b =>
-    b.title.toLowerCase().includes(query) ||
-    b.body.toLowerCase().includes(query)
+  const filtered = notes.filter(note =>
+    note.title.toLowerCase().includes(query) ||
+    note.body.toLowerCase().includes(query)
   );
-  render(filtered);
+
+  showNotes(filtered);
 });

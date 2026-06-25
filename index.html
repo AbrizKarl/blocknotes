@@ -3,79 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlockNotes — Mine your thoughts</title>
+  <title>BlockNotes</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">◆</span>
-      <span class="brand-name">BlockNotes</span>
-    </div>
-    <div class="chain-stat">
-      <span class="stat-label">chain length</span>
-      <span class="stat-value" id="chainLength">0</span>
-    </div>
-  </header>
+  <h1>BlockNotes</h1>
+  <p>A simple notes app where each note is a "block" in a chain.</p>
 
-  <main class="layout">
-
-    <section class="miner">
-      <h1 class="miner-title">Mine a new block</h1>
-      <p class="miner-sub">Every note gets sealed with a hash and linked to the one before it.</p>
-
-      <input
-        type="text"
-        id="noteTitle"
-        class="input-title"
-        placeholder="Block title (e.g. Grocery list)"
-        maxlength="60"
-      >
-      <textarea
-        id="noteBody"
-        class="input-body"
-        placeholder="Write what you want to remember..."
-        rows="4"
-      ></textarea>
-
-      <div class="miner-actions">
-        <span class="hint" id="charHint">0 / 1000</span>
-        <button id="mineBtn" class="btn-mine">⛏ Mine block</button>
-      </div>
-    </section>
-
-    <section class="chain-section">
-      <div class="chain-header">
-        <h2>Your chain</h2>
-        <input type="text" id="searchInput" class="search-input" placeholder="Search blocks...">
-      </div>
-
-      <div id="chainContainer" class="chain">
-        <!-- blocks render here -->
-      </div>
-
-      <div id="emptyState" class="empty-state">
-        <p class="empty-glyph">⛓</p>
-        <p class="empty-title">No blocks yet</p>
-        <p class="empty-sub">Mine your first one above to start the chain.</p>
-      </div>
-    </section>
-
-  </main>
-
-  <div id="editModal" class="modal-overlay hidden">
-    <div class="modal">
-      <h3>Edit block</h3>
-      <input type="text" id="editTitle" class="input-title" maxlength="60">
-      <textarea id="editBody" class="input-body" rows="5"></textarea>
-      <div class="modal-actions">
-        <button id="cancelEdit" class="btn-ghost">Cancel</button>
-        <button id="saveEdit" class="btn-mine">Reseal block</button>
-      </div>
-    </div>
+  <div class="form-box">
+    <input type="text" id="noteTitle" placeholder="Title">
+    <textarea id="noteBody" placeholder="Write your note here..." rows="4"></textarea>
+    <button id="addBtn">Add Note</button>
   </div>
 
+  <input type="text" id="searchInput" placeholder="Search notes...">
+
+  <h2>Your Notes (<span id="noteCount">0</span>)</h2>
+
+  <div id="notesList"></div>
+
+  <p id="emptyMessage">No notes yet. Add one above!</p>
+
+  <!-- Edit popup -->
+  <div id="editBox" class="hidden">
+    <h3>Edit Note</h3>
+    <input type="text" id="editTitle">
+    <textarea id="editBody" rows="4"></textarea>
+    <button id="saveEditBtn">Save</button>
+    <button id="cancelEditBtn">Cancel</button>
+  </div>
+
+  <!-- This loads the Supabase library so we can talk to our database -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
