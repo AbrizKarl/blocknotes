@@ -1,40 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BlockNotes</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlockNotes — a ledger for your thinking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <h1>BlockNotes</h1>
-  <p>A simple notes app where each note is a "block" in a chain.</p>
+  <!-- Ambient chain backdrop -->
+  <canvas id="bg" aria-hidden="true"></canvas>
 
-  <div class="form-box">
-    <input type="text" id="noteTitle" placeholder="Title">
-    <textarea id="noteBody" placeholder="Write your note here..." rows="4"></textarea>
-    <button id="addBtn">Add Note</button>
+  <div class="app">
+
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">◆</span>
+        <span class="brand-name">BlockNotes</span>
+      </div>
+
+      <button class="cmdk-trigger" id="cmdkTrigger" type="button">
+        <span>Search or run a command</span>
+        <kbd>⌘K</kbd>
+      </button>
+
+      <div class="topbar-right">
+        <div class="sync-status" id="syncStatus" data-state="saved">
+          <span class="sync-dot"></span>
+          <span class="sync-label">Saved locally</span>
+        </div>
+        <button class="icon-btn" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">
+          <svg id="themeIcon" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="layout">
+
+      <!-- Composer -->
+      <section class="composer" id="composer" aria-label="Create a note">
+        <div class="composer-types" role="tablist" aria-label="Note type">
+          <button class="type-tab active" data-type="text" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            Text
+          </button>
+          <button class="type-tab" data-type="checklist" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m4 7 2 2 4-4M4 15l2 2 4-4M12 8h8M12 16h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Checklist
+          </button>
+          <button class="type-tab" data-type="code" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="m9 18-6-6 6-6M15 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Code
+          </button>
+        </div>
+
+        <input type="text" id="noteTitle" class="composer-title" placeholder="Untitled block" autocomplete="off">
+
+        <textarea id="noteBody" class="composer-body" placeholder="Write your note here…" rows="3"></textarea>
+
+        <div id="checklistEditor" class="checklist-editor hidden"></div>
+
+        <div id="codeEditor" class="code-editor hidden">
+          <div class="code-editor-bar">
+            <select id="codeLang" class="code-lang">
+              <option value="javascript">JavaScript</option>
+              <option value="text">Plain text</option>
+            </select>
+            <span class="code-editor-hint">JavaScript blocks can be run right in the card</span>
+          </div>
+          <textarea id="codeBody" class="composer-body code-font" placeholder="console.log('hello chain')" rows="4"></textarea>
+        </div>
+
+        <div class="composer-footer">
+          <span class="composer-hint" id="composerHint">Text block</span>
+          <button id="addBtn" class="btn btn-primary" type="button">
+            <span>Add to chain</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- Toolbar row: search + count -->
+      <div class="feed-toolbar">
+        <div class="search-wrap">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <input type="text" id="searchInput" placeholder="Search your chain…" autocomplete="off">
+        </div>
+        <div class="feed-count"><span id="noteCount">0</span> blocks</div>
+      </div>
+
+      <!-- Notes feed / chain -->
+      <section class="chain" id="notesList" aria-label="Your notes"></section>
+
+      <p id="emptyMessage" class="empty-state hidden">
+        <span class="empty-glyph">◇</span>
+        <span class="empty-title">The chain is empty</span>
+        <span class="empty-sub">Write something above and it becomes block #0</span>
+      </p>
+
+    </main>
   </div>
 
-  <input type="text" id="searchInput" placeholder="Search notes...">
+  <!-- Slide-over edit panel -->
+  <div id="editOverlay" class="edit-overlay hidden"></div>
+  <aside id="editBox" class="edit-panel hidden" aria-label="Edit note">
+    <div class="edit-panel-head">
+      <h3>Edit block</h3>
+      <button id="cancelEditBtn" class="icon-btn" type="button" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <input type="text" id="editTitle" class="composer-title" placeholder="Untitled block">
+    <textarea id="editBody" class="composer-body" rows="6"></textarea>
+    <div class="edit-panel-footer">
+      <button id="saveEditBtn" class="btn btn-primary" type="button">Save changes</button>
+      <button id="cancelEditBtn2" class="btn btn-ghost" type="button">Cancel</button>
+    </div>
+  </aside>
 
-  <h2>Your Notes (<span id="noteCount">0</span>)</h2>
-
-  <div id="notesList"></div>
-
-  <p id="emptyMessage">No notes yet. Add one above!</p>
-
-  <!-- Edit popup -->
-  <div id="editBox" class="hidden">
-    <h3>Edit Note</h3>
-    <input type="text" id="editTitle">
-    <textarea id="editBody" rows="4"></textarea>
-    <button id="saveEditBtn">Save</button>
-    <button id="cancelEditBtn">Cancel</button>
+  <!-- Command palette -->
+  <div id="cmdkOverlay" class="cmdk-overlay hidden">
+    <div class="cmdk" role="dialog" aria-label="Command palette">
+      <div class="cmdk-input-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <input type="text" id="cmdkInput" placeholder="Type a command or search notes…" autocomplete="off">
+        <kbd>esc</kbd>
+      </div>
+      <div id="cmdkResults" class="cmdk-results"></div>
+    </div>
   </div>
 
-  <!-- This loads the Supabase library so we can talk to our database -->
+  <!-- Toasts -->
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="script.js"></script>
 </body>

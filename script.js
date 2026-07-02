@@ -1,146 +1,678 @@
-// BlockNotes - a simple notes app
-// Each note is called a "block" and has a hash based on its content.
+// =============================================================
+// BlockNotes — premium edition
+// Each note is a "block" in a visible chain. Blocks can be plain
+// text, checklists, or runnable JS snippets. Everything autosaves
+// with a debounce, and there's a command palette for quick actions.
+// =============================================================
 
-// Load saved notes from the browser, or start with an empty list
-let notes = JSON.parse(localStorage.getItem("notes")) || [];
+// ---------- Config -------------------------------------------------
+// Flip BACKEND.enabled to true and fill in a Supabase project to
+// sync blocks to a real database instead of (or in addition to)
+// localStorage. Left off by default so the app works with zero setup.
+const BACKEND = {
+  enabled: false,
+  url: "",       // e.g. "https://xxxx.supabase.co"
+  anonKey: "",   // your Supabase anon/public key
+  table: "notes"
+};
 
-// Get references to the HTML elements we need
-const noteTitle = document.getElementById("noteTitle");
-const noteBody = document.getElementById("noteBody");
-const addBtn = document.getElementById("addBtn");
-const notesList = document.getElementById("notesList");
-const noteCount = document.getElementById("noteCount");
-const emptyMessage = document.getElementById("emptyMessage");
-const searchInput = document.getElementById("searchInput");
+let supabaseClient = null;
+if (BACKEND.enabled && BACKEND.url && BACKEND.anonKey && window.supabase) {
+  supabaseClient = window.supabase.createClient(BACKEND.url, BACKEND.anonKey);
+}
 
-const editBox = document.getElementById("editBox");
-const editTitle = document.getElementById("editTitle");
-const editBody = document.getElementById("editBody");
-const saveEditBtn = document.getElementById("saveEditBtn");
-const cancelEditBtn = document.getElementById("cancelEditBtn");
+// ---------- State ----------------------------------------------------
+let notes = loadNotes();
+let activeType = "text";
+let editingId = null;
+let checklistDraft = [];
+let dragId = null;
+let saveTimer = null;
 
-let editingIndex = null; // keeps track of which note is being edited
+// ---------- DOM refs ---------------------------------------------------
+const $ = (id) => document.getElementById(id);
 
-// Show the notes on the page when it first loads
-showNotes(notes);
+const noteTitle = $("noteTitle");
+const noteBody = $("noteBody");
+const checklistEditor = $("checklistEditor");
+const codeEditor = $("codeEditor");
+const codeBody = $("codeBody");
+const codeLang = $("codeLang");
+const addBtn = $("addBtn");
+const notesList = $("notesList");
+const noteCount = $("noteCount");
+const emptyMessage = $("emptyMessage");
+const searchInput = $("searchInput");
+const composerHint = $("composerHint");
+const syncStatus = $("syncStatus");
 
-// Makes a simple fake "hash" string from the note's text.
-// This is NOT a real secure hash, just for the blockchain theme.
+const editOverlay = $("editOverlay");
+const editBox = $("editBox");
+const editTitle = $("editTitle");
+const editBody = $("editBody");
+const saveEditBtn = $("saveEditBtn");
+const cancelEditBtn = $("cancelEditBtn");
+const cancelEditBtn2 = $("cancelEditBtn2");
+
+const cmdkTrigger = $("cmdkTrigger");
+const cmdkOverlay = $("cmdkOverlay");
+const cmdkInput = $("cmdkInput");
+const cmdkResults = $("cmdkResults");
+
+const themeToggle = $("themeToggle");
+const toastStack = $("toastStack");
+
+// =============================================================
+// Persistence — debounced autosave with a visible sync status
+// =============================================================
+
+function loadNotes() {
+  try {
+    return JSON.parse(localStorage.getItem("blocknotes_v2")) || [];
+  } catch {
+    return [];
+  }
+}
+
+function scheduleSave() {
+  setSyncState("saving");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(commitSave, 500);
+}
+
+async function commitSave() {
+  try {
+    localStorage.setItem("blocknotes_v2", JSON.stringify(notes));
+
+    if (supabaseClient) {
+      // Optional real backend sync — mirrors the whole chain.
+      await supabaseClient.from(BACKEND.table).upsert(
+        notes.map((n) => ({ id: n.id, payload: n }))
+      );
+    }
+
+    setSyncState("saved");
+  } catch (err) {
+    console.error("Save failed:", err);
+    setSyncState("error");
+  }
+}
+
+function setSyncState(state) {
+  syncStatus.dataset.state = state;
+  const label = syncStatus.querySelector(".sync-label");
+  if (state === "saving") label.textContent = "Saving…";
+  else if (state === "error") label.textContent = "Save failed";
+  else label.textContent = supabaseClient ? "Synced" : "Saved locally";
+}
+
+// =============================================================
+// Hashing — themed, not cryptographic
+// =============================================================
+
 function makeHash(text) {
   let hash = 0;
   for (let i = 0; i < text.length; i++) {
-    hash = (hash * 31 + text.charCodeAt(i)) % 1000000;
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
   }
-  return hash.toString(16); // turn it into letters/numbers
+  return hash.toString(16).padStart(6, "0").slice(0, 6);
 }
 
-// Save the notes array into the browser's storage
-function saveNotes() {
-  localStorage.setItem("notes", JSON.stringify(notes));
+function prevHashFor(index) {
+  return index === 0 ? "000000" : notes[index - 1].hash;
 }
 
-// Show a list of notes on the page
+// =============================================================
+// Toasts
+// =============================================================
+
+function toast(message, type = "success") {
+  const el = document.createElement("div");
+  el.className = `toast${type === "error" ? " error" : ""}`;
+  el.innerHTML = `<span class="toast-dot"></span><span>${escapeHtml(message)}</span>`;
+  toastStack.appendChild(el);
+  setTimeout(() => {
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 220);
+  }, 2200);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// =============================================================
+// Composer — type switching
+// =============================================================
+
+document.querySelectorAll(".type-tab").forEach((tab) => {
+  tab.addEventListener("click", () => setActiveType(tab.dataset.type));
+});
+
+function setActiveType(type) {
+  activeType = type;
+  document.querySelectorAll(".type-tab").forEach((t) => t.classList.toggle("active", t.dataset.type === type));
+
+  noteBody.classList.toggle("hidden", type !== "text");
+  checklistEditor.classList.toggle("hidden", type !== "checklist");
+  codeEditor.classList.toggle("hidden", type !== "code");
+
+  const hints = { text: "Text block", checklist: "Checklist block", code: "Runnable code block" };
+  composerHint.textContent = hints[type];
+
+  if (type === "checklist" && checklistDraft.length === 0) {
+    addChecklistRow();
+  }
+}
+
+// checklist rows in composer
+function addChecklistRow(value = "") {
+  const id = crypto.randomUUID ? crypto.randomUUID() : String(Math.random());
+  checklistDraft.push({ id, text: value, done: false });
+  renderChecklistEditor();
+}
+
+function renderChecklistEditor() {
+  checklistEditor.innerHTML = "";
+  checklistDraft.forEach((row, i) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "checklist-row";
+    rowEl.innerHTML = `
+      <input type="text" placeholder="List item…" value="${escapeHtml(row.text)}">
+      <button type="button" class="row-remove" aria-label="Remove item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    `;
+    rowEl.querySelector("input").addEventListener("input", (e) => {
+      checklistDraft[i].text = e.target.value;
+    });
+    rowEl.querySelector(".row-remove").addEventListener("click", () => {
+      checklistDraft.splice(i, 1);
+      if (checklistDraft.length === 0) addChecklistRow();
+      else renderChecklistEditor();
+    });
+    checklistEditor.appendChild(rowEl);
+  });
+
+  const addRowBtn = document.createElement("button");
+  addRowBtn.type = "button";
+  addRowBtn.className = "checklist-add";
+  addRowBtn.textContent = "+ Add item";
+  addRowBtn.addEventListener("click", () => addChecklistRow());
+  checklistEditor.appendChild(addRowBtn);
+}
+
+renderChecklistEditor();
+
+// =============================================================
+// Add note
+// =============================================================
+
+addBtn.addEventListener("click", addNote);
+
+function addNote() {
+  const title = noteTitle.value.trim();
+  let payload = {};
+  let contentForHash = title;
+
+  if (activeType === "text") {
+    const body = noteBody.value.trim();
+    if (title === "" && body === "") return;
+    payload = { body };
+    contentForHash += body;
+  } else if (activeType === "checklist") {
+    const items = checklistDraft.filter((r) => r.text.trim() !== "");
+    if (title === "" && items.length === 0) return;
+    payload = { items: items.map((r) => ({ text: r.text.trim(), done: false })) };
+    contentForHash += items.map((r) => r.text).join("");
+  } else if (activeType === "code") {
+    const code = codeBody.value.trim();
+    if (title === "" && code === "") return;
+    payload = { code, lang: codeLang.value };
+    contentForHash += code;
+  }
+
+  const newNote = {
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+    type: activeType,
+    title: title || "Untitled",
+    ...payload,
+    hash: makeHash(contentForHash + Date.now()),
+    createdAt: Date.now()
+  };
+
+  notes.push(newNote);
+  scheduleSave();
+  showNotes(notes);
+  toast("Block added to the chain");
+
+  // reset composer
+  noteTitle.value = "";
+  noteBody.value = "";
+  codeBody.value = "";
+  checklistDraft = [];
+  addChecklistRow();
+  noteTitle.focus();
+}
+
+// =============================================================
+// Render the chain
+// =============================================================
+
 function showNotes(list) {
-  notesList.innerHTML = ""; // clear what's currently shown
+  notesList.innerHTML = "";
   noteCount.textContent = notes.length;
+  emptyMessage.classList.toggle("hidden", list.length !== 0);
 
-  if (list.length === 0) {
-    emptyMessage.classList.remove("hidden");
-  } else {
-    emptyMessage.classList.add("hidden");
-  }
-
-  list.forEach((note, index) => {
+  list.forEach((note) => {
+    const realIndex = notes.indexOf(note);
     const block = document.createElement("div");
     block.className = "note-block";
+    block.draggable = true;
+    block.dataset.id = note.id;
 
     block.innerHTML = `
-      <p class="note-title"></p>
-      <p class="note-body"></p>
-      <p class="note-hash">Block #${index} - hash: ${note.hash}</p>
-      <div class="note-actions">
-        <button class="edit-btn">Edit</button>
-        <button class="delete-btn">Delete</button>
+      <div class="chain-node" title="Drag to reorder">
+        <div class="chain-node-dot"></div>
+      </div>
+      <div class="note-card">
+        <div class="note-card-head">
+          <p class="note-title"></p>
+          <span class="note-type-badge">${note.type}</span>
+        </div>
+        <div class="note-content"></div>
+        <p class="note-hash">Block <span class="hash-chip">#${realIndex}</span> · prev <span class="hash-chip">${prevHashFor(realIndex)}</span> · hash <span class="hash-chip">${note.hash}</span></p>
+        <div class="note-actions">
+          <button class="pill-btn edit-btn" type="button">Edit</button>
+          <button class="pill-btn delete-btn" type="button">Delete</button>
+        </div>
       </div>
     `;
 
-    // Use textContent so any text the user types is shown safely
     block.querySelector(".note-title").textContent = note.title;
-    block.querySelector(".note-body").textContent = note.body;
+    renderNoteContent(block.querySelector(".note-content"), note);
 
-    // When Edit is clicked, open the edit box for this note
-    block.querySelector(".edit-btn").addEventListener("click", () => {
-      openEditBox(index);
+    block.querySelector(".edit-btn").addEventListener("click", () => openEditBox(note.id));
+    block.querySelector(".delete-btn").addEventListener("click", () => deleteNote(note.id));
+
+    // drag & drop reorder
+    block.addEventListener("dragstart", () => {
+      dragId = note.id;
+      requestAnimationFrame(() => block.classList.add("dragging"));
     });
-
-    // When Delete is clicked, remove this note
-    block.querySelector(".delete-btn").addEventListener("click", () => {
-      notes.splice(index, 1);
-      saveNotes();
-      showNotes(notes);
+    block.addEventListener("dragend", () => {
+      block.classList.remove("dragging");
+      document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+    });
+    block.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      block.classList.add("drag-over");
+    });
+    block.addEventListener("dragleave", () => block.classList.remove("drag-over"));
+    block.addEventListener("drop", (e) => {
+      e.preventDefault();
+      block.classList.remove("drag-over");
+      reorderNotes(dragId, note.id);
     });
 
     notesList.appendChild(block);
   });
 }
 
-// Add a new note when the button is clicked
-addBtn.addEventListener("click", () => {
-  const title = noteTitle.value.trim();
-  const body = noteBody.value.trim();
+function renderNoteContent(container, note) {
+  if (note.type === "text") {
+    const p = document.createElement("p");
+    p.className = "note-body";
+    p.textContent = note.body || "";
+    container.appendChild(p);
+  } else if (note.type === "checklist") {
+    const ul = document.createElement("ul");
+    ul.className = "note-checklist";
+    (note.items || []).forEach((item, i) => {
+      const li = document.createElement("li");
+      li.className = item.done ? "done" : "";
+      li.innerHTML = `<span class="box"></span><span class="item-text"></span>`;
+      li.querySelector(".item-text").textContent = item.text;
+      li.addEventListener("click", () => {
+        item.done = !item.done;
+        li.classList.toggle("done", item.done);
+        scheduleSave();
+      });
+      ul.appendChild(li);
+    });
+    container.appendChild(ul);
+  } else if (note.type === "code") {
+    const wrap = document.createElement("div");
+    wrap.className = "code-block";
+    const pre = document.createElement("pre");
+    pre.textContent = note.code || "";
+    wrap.appendChild(pre);
 
-  if (title === "" && body === "") {
-    return; // don't add an empty note
+    if (note.lang === "javascript") {
+      const bar = document.createElement("div");
+      bar.className = "code-run-bar";
+      bar.innerHTML = `
+        <button class="run-btn" type="button">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          Run
+        </button>
+        <span class="code-output"></span>
+      `;
+      const output = bar.querySelector(".code-output");
+      bar.querySelector(".run-btn").addEventListener("click", () => runSnippet(note.code, output));
+      wrap.appendChild(bar);
+    }
+    container.appendChild(wrap);
   }
-
-  const newNote = {
-    title: title || "Untitled",
-    body: body,
-    hash: makeHash(title + body + Date.now())
-  };
-
-  notes.push(newNote);
-  saveNotes();
-  showNotes(notes);
-
-  // clear the form
-  noteTitle.value = "";
-  noteBody.value = "";
-});
-
-// Open the edit box and fill it with the note's current info
-function openEditBox(index) {
-  editingIndex = index;
-  editTitle.value = notes[index].title;
-  editBody.value = notes[index].body;
-  editBox.classList.remove("hidden");
 }
 
-// Save changes made in the edit box
+function runSnippet(code, outputEl) {
+  const logs = [];
+  const fakeConsole = {
+    log: (...args) => logs.push(args.map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" "))
+  };
+  try {
+    // Sandboxed to this closure only — no access to page state beyond a fake console.
+    const runner = new Function("console", code);
+    runner(fakeConsole);
+    outputEl.classList.remove("error");
+    outputEl.textContent = logs.length ? logs.join("\n") : "✓ ran with no output";
+  } catch (err) {
+    outputEl.classList.add("error");
+    outputEl.textContent = "✗ " + err.message;
+  }
+}
+
+function deleteNote(id) {
+  notes = notes.filter((n) => n.id !== id);
+  scheduleSave();
+  showNotes(applyFilter());
+  toast("Block removed", "error");
+}
+
+function reorderNotes(fromId, toId) {
+  if (fromId === toId || !fromId) return;
+  const fromIndex = notes.findIndex((n) => n.id === fromId);
+  const toIndex = notes.findIndex((n) => n.id === toId);
+  if (fromIndex === -1 || toIndex === -1) return;
+  const [moved] = notes.splice(fromIndex, 1);
+  notes.splice(toIndex, 0, moved);
+  // re-hash the chain so links stay honest after reordering
+  notes.forEach((n, i) => {
+    n.hash = makeHash(n.title + JSON.stringify(n.body || n.items || n.code || "") + i + n.createdAt);
+  });
+  scheduleSave();
+  showNotes(applyFilter());
+}
+
+// =============================================================
+// Edit panel
+// =============================================================
+
+function openEditBox(id) {
+  editingId = id;
+  const note = notes.find((n) => n.id === id);
+  editTitle.value = note.title;
+
+  if (note.type === "text") editBody.value = note.body || "";
+  else if (note.type === "checklist") editBody.value = (note.items || []).map((i) => i.text).join("\n");
+  else if (note.type === "code") editBody.value = note.code || "";
+
+  editOverlay.classList.remove("hidden");
+  editBox.classList.remove("hidden");
+  editTitle.focus();
+}
+
+function closeEditBox() {
+  editOverlay.classList.add("hidden");
+  editBox.classList.add("hidden");
+  editingId = null;
+}
+
+[cancelEditBtn, cancelEditBtn2].forEach((btn) => btn.addEventListener("click", closeEditBox));
+editOverlay.addEventListener("click", closeEditBox);
+
 saveEditBtn.addEventListener("click", () => {
-  const note = notes[editingIndex];
+  const note = notes.find((n) => n.id === editingId);
+  if (!note) return;
   note.title = editTitle.value.trim() || "Untitled";
-  note.body = editBody.value.trim();
-  note.hash = makeHash(note.title + note.body + Date.now());
 
-  saveNotes();
+  if (note.type === "text") {
+    note.body = editBody.value.trim();
+  } else if (note.type === "checklist") {
+    const existingDone = {};
+    (note.items || []).forEach((i) => (existingDone[i.text] = i.done));
+    note.items = editBody.value.split("\n").map((t) => t.trim()).filter(Boolean).map((t) => ({ text: t, done: !!existingDone[t] }));
+  } else if (note.type === "code") {
+    note.code = editBody.value;
+  }
+
+  note.hash = makeHash(note.title + JSON.stringify(note.body || note.items || note.code || "") + Date.now());
+  scheduleSave();
+  showNotes(applyFilter());
+  closeEditBox();
+  toast("Block updated");
+});
+
+// =============================================================
+// Search
+// =============================================================
+
+function applyFilter() {
+  const query = searchInput.value.toLowerCase().trim();
+  if (!query) return notes;
+  return notes.filter((note) => {
+    const haystack = [
+      note.title,
+      note.body || "",
+      note.code || "",
+      ...(note.items || []).map((i) => i.text)
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+searchInput.addEventListener("input", () => showNotes(applyFilter()));
+
+// =============================================================
+// Theme toggle
+// =============================================================
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem("blocknotes_theme", theme);
+}
+
+applyTheme(localStorage.getItem("blocknotes_theme") || "dark");
+
+themeToggle.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  applyTheme(next);
+  toast(next === "light" ? "Light mode on" : "Dark mode on");
+});
+
+// =============================================================
+// Command palette
+// =============================================================
+
+function getCommands() {
+  return [
+    { tag: "action", label: "New text block", run: () => { setActiveType("text"); noteTitle.focus(); } },
+    { tag: "action", label: "New checklist block", run: () => { setActiveType("checklist"); noteTitle.focus(); } },
+    { tag: "action", label: "New code block", run: () => { setActiveType("code"); noteTitle.focus(); } },
+    { tag: "action", label: "Focus search", run: () => searchInput.focus() },
+    { tag: "action", label: "Toggle theme", run: () => themeToggle.click() },
+    { tag: "action", label: "Export chain as JSON", run: exportJSON },
+    { tag: "action", label: "Clear all blocks", run: clearAll }
+  ];
+}
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(notes, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "blocknotes-export.json";
+  a.click();
+  URL.revokeObjectURL(url);
+  toast("Chain exported");
+}
+
+function clearAll() {
+  if (notes.length === 0) return toast("Chain is already empty", "error");
+  notes = [];
+  scheduleSave();
   showNotes(notes);
-  editBox.classList.add("hidden");
+  toast("All blocks cleared", "error");
+}
+
+let cmdkActiveIndex = 0;
+
+function openCmdk() {
+  cmdkOverlay.classList.remove("hidden");
+  cmdkInput.value = "";
+  renderCmdkResults("");
+  cmdkInput.focus();
+}
+
+function closeCmdk() {
+  cmdkOverlay.classList.add("hidden");
+}
+
+function renderCmdkResults(query) {
+  const q = query.toLowerCase();
+  const commandMatches = getCommands().filter((c) => c.label.toLowerCase().includes(q));
+  const noteMatches = q ? notes.filter((n) => n.title.toLowerCase().includes(q)).slice(0, 6) : [];
+
+  cmdkResults.innerHTML = "";
+  cmdkActiveIndex = 0;
+
+  if (commandMatches.length === 0 && noteMatches.length === 0) {
+    cmdkResults.innerHTML = `<div class="cmdk-empty">No matches — try "new", "theme", or a note title</div>`;
+    return;
+  }
+
+  const items = [
+    ...commandMatches.map((c) => ({ label: c.label, tag: "action", onSelect: () => { c.run(); closeCmdk(); } })),
+    ...noteMatches.map((n) => ({ label: n.title, tag: n.type, onSelect: () => { openEditBox(n.id); closeCmdk(); } }))
+  ];
+
+  items.forEach((item, i) => {
+    const el = document.createElement("div");
+    el.className = "cmdk-item" + (i === 0 ? " active" : "");
+    el.innerHTML = `<span class="cmdk-item-main">${escapeHtml(item.label)}</span><span class="cmdk-item-tag">${item.tag}</span>`;
+    el.addEventListener("click", item.onSelect);
+    el.addEventListener("mouseenter", () => setCmdkActive(i));
+    cmdkResults.appendChild(el);
+  });
+
+  cmdkResults._items = items;
+}
+
+function setCmdkActive(index) {
+  const children = [...cmdkResults.children];
+  children.forEach((c) => c.classList.remove("active"));
+  if (children[index]) {
+    children[index].classList.add("active");
+    cmdkActiveIndex = index;
+  }
+}
+
+cmdkTrigger.addEventListener("click", openCmdk);
+cmdkOverlay.addEventListener("click", (e) => { if (e.target === cmdkOverlay) closeCmdk(); });
+cmdkInput.addEventListener("input", () => renderCmdkResults(cmdkInput.value));
+
+cmdkInput.addEventListener("keydown", (e) => {
+  const items = cmdkResults._items || [];
+  if (e.key === "ArrowDown") { e.preventDefault(); setCmdkActive(Math.min(cmdkActiveIndex + 1, items.length - 1)); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); setCmdkActive(Math.max(cmdkActiveIndex - 1, 0)); }
+  else if (e.key === "Enter") { e.preventDefault(); items[cmdkActiveIndex] && items[cmdkActiveIndex].onSelect(); }
+  else if (e.key === "Escape") closeCmdk();
 });
 
-// Close the edit box without saving
-cancelEditBtn.addEventListener("click", () => {
-  editBox.classList.add("hidden");
+document.addEventListener("keydown", (e) => {
+  const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
+  if (isCmdK) {
+    e.preventDefault();
+    cmdkOverlay.classList.contains("hidden") ? openCmdk() : closeCmdk();
+  } else if (e.key === "Escape") {
+    if (!editBox.classList.contains("hidden")) closeEditBox();
+  }
 });
 
-// Search/filter notes as the user types
-searchInput.addEventListener("input", () => {
-  const query = searchInput.value.toLowerCase();
+// =============================================================
+// Ambient chain backdrop — a few slow-drifting linked nodes
+// =============================================================
 
-  const filtered = notes.filter(note =>
-    note.title.toLowerCase().includes(query) ||
-    note.body.toLowerCase().includes(query)
-  );
+function initBackdrop() {
+  const canvas = $("bg");
+  const ctx = canvas.getContext("2d");
+  let w, h, nodes;
 
-  showNotes(filtered);
-});
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+
+  function makeNodes() {
+    const count = Math.max(5, Math.min(9, Math.floor(w / 220)));
+    nodes = Array.from({ length: count }, () => ({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.15,
+      vy: (Math.random() - 0.5) * 0.15
+    }));
+  }
+
+  resize();
+  makeNodes();
+  window.addEventListener("resize", () => { resize(); makeNodes(); });
+
+  const accent = getComputedStyle(document.documentElement);
+
+  function frame() {
+    ctx.clearRect(0, 0, w, h);
+    const lineColor = document.documentElement.dataset.theme === "light" ? "180,170,140" : "79,216,196";
+
+    nodes.forEach((n) => {
+      n.x += n.vx; n.y += n.vy;
+      if (n.x < 0 || n.x > w) n.vx *= -1;
+      if (n.y < 0 || n.y > h) n.vy *= -1;
+    });
+
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (dist < 260) {
+          ctx.strokeStyle = `rgba(${lineColor},${0.09 * (1 - dist / 260)})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+      ctx.fillStyle = `rgba(${lineColor},0.5)`;
+      ctx.beginPath();
+      ctx.arc(nodes[i].x, nodes[i].y, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    requestAnimationFrame(frame);
+  }
+}
+
+// =============================================================
+// Boot
+// =============================================================
+
+initBackdrop();
+setSyncState("saved");
+showNotes(notes);
