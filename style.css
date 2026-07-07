@@ -346,6 +346,82 @@ body {
   letter-spacing: 0.05em;
 }
 
+/* API integration buttons (Quotes API + Dictionary API) */
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.api-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.api-btn:hover {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.api-btn:disabled { cursor: wait; }
+
+.api-btn.loading {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  animation: api-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes api-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* dictionary lookup row */
+.define-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+}
+
+.define-row input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.define-row input::placeholder { color: var(--text-faint); }
+
+.define-row:focus-within { border-color: var(--accent-dim); }
+
+.define-row kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
 /* checklist editor */
 .checklist-editor { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 6px; }
 

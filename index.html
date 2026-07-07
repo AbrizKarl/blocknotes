@@ -75,8 +75,25 @@
           <textarea id="codeBody" class="composer-body code-font" placeholder="console.log('hello chain')" rows="4"></textarea>
         </div>
 
+        <!-- API integrations: Quotes API + Dictionary API -->
+        <div id="defineRow" class="define-row hidden">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <input type="text" id="defineInput" placeholder="Type a word and press Enter…" autocomplete="off">
+          <kbd>↵</kbd>
+        </div>
+
         <div class="composer-footer">
-          <span class="composer-hint" id="composerHint">Text block</span>
+          <div class="composer-tools">
+            <button id="quoteBtn" class="api-btn" type="button" title="Insert a random quote (Quotes API)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M9.6 5C6 7 4 10 4 13.6c0 3 1.8 5.4 4.4 5.4 2.2 0 3.8-1.6 3.8-3.7 0-2-1.5-3.5-3.4-3.5-.3 0-.7 0-.8.1.3-2 1.7-3.9 3.6-5L9.6 5Zm9 0c-3.6 2-5.6 5-5.6 8.6 0 3 1.8 5.4 4.4 5.4 2.2 0 3.8-1.6 3.8-3.7 0-2-1.5-3.5-3.4-3.5-.3 0-.7 0-.8.1.3-2 1.7-3.9 3.6-5L18.6 5Z"/></svg>
+              Quote
+            </button>
+            <button id="defineBtn" class="api-btn" type="button" title="Look up a word (Dictionary API)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              Define
+            </button>
+            <span class="composer-hint" id="composerHint">Text block</span>
+          </div>
           <button id="addBtn" class="btn btn-primary" type="button">
             <span>Add to chain</span>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>

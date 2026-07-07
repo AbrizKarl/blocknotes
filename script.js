@@ -457,6 +457,106 @@ saveEditBtn.addEventListener("click", () => {
 });
 
 // =============================================================
+// External APIs — two integrations
+//   1. Quotes API      (https://dummyjson.com/quotes/random)
+//   2. Dictionary API  (https://api.dictionaryapi.dev)
+// Both are free, need no API key, and allow browser requests
+// (CORS), so they work on GitHub Pages with zero setup.
+// Flow: the API response fills the composer, then the user
+// reviews it and presses "Add to chain" like any other block.
+// =============================================================
+
+const QUOTE_API = "https://dummyjson.com/quotes/random";
+const DICTIONARY_API = "https://api.dictionaryapi.dev/api/v2/entries/en/";
+
+const quoteBtn = $("quoteBtn");
+const defineBtn = $("defineBtn");
+const defineRow = $("defineRow");
+const defineInput = $("defineInput");
+
+// --- API #1: random quote -> composer -------------------------------
+async function insertRandomQuote() {
+  setApiLoading(quoteBtn, true);
+  try {
+    const res = await fetch(QUOTE_API);
+    if (!res.ok) throw new Error(`Quote API responded with ${res.status}`);
+    const data = await res.json();
+
+    setActiveType("text");
+    noteTitle.value = `Quote — ${data.author}`;
+    noteBody.value = `“${data.quote}”\n— ${data.author}`;
+    noteBody.focus();
+    toast("Quote loaded — review it and add to chain");
+  } catch (err) {
+    console.error("Quote API failed:", err);
+    toast("Couldn't reach the quote API — check your connection", "error");
+  } finally {
+    setApiLoading(quoteBtn, false);
+  }
+}
+
+// --- API #2: dictionary lookup -> composer ---------------------------
+async function defineWord(rawWord) {
+  const word = rawWord.trim().toLowerCase();
+  if (!word) return;
+
+  setApiLoading(defineBtn, true);
+  try {
+    const res = await fetch(DICTIONARY_API + encodeURIComponent(word));
+    if (res.status === 404) {
+      toast(`No definition found for “${word}”`, "error");
+      return;
+    }
+    if (!res.ok) throw new Error(`Dictionary API responded with ${res.status}`);
+
+    const data = await res.json();
+    const entry = data[0];
+
+    // Take up to three meanings: "(noun) a small piece of..."
+    const meanings = (entry.meanings || [])
+      .slice(0, 3)
+      .map((m) => `(${m.partOfSpeech}) ${m.definitions[0].definition}`)
+      .join("\n\n");
+
+    const phonetic = entry.phonetic || (entry.phonetics || []).map((p) => p.text).find(Boolean) || "";
+
+    setActiveType("text");
+    noteTitle.value = `Define: ${entry.word}`;
+    noteBody.value = (phonetic ? phonetic + "\n\n" : "") + meanings;
+    noteBody.focus();
+
+    defineInput.value = "";
+    defineRow.classList.add("hidden");
+    toast(`Definition of “${entry.word}” loaded`);
+  } catch (err) {
+    console.error("Dictionary API failed:", err);
+    toast("Couldn't reach the dictionary API — check your connection", "error");
+  } finally {
+    setApiLoading(defineBtn, false);
+  }
+}
+
+// --- shared helpers + wiring -----------------------------------------
+function setApiLoading(btn, isLoading) {
+  btn.disabled = isLoading;
+  btn.classList.toggle("loading", isLoading);
+}
+
+function toggleDefineRow(forceOpen = null) {
+  const open = forceOpen === null ? defineRow.classList.contains("hidden") : forceOpen;
+  defineRow.classList.toggle("hidden", !open);
+  if (open) defineInput.focus();
+}
+
+quoteBtn.addEventListener("click", insertRandomQuote);
+defineBtn.addEventListener("click", () => toggleDefineRow());
+
+defineInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") defineWord(defineInput.value);
+  else if (e.key === "Escape") toggleDefineRow(false);
+});
+
+// =============================================================
 // Search
 // =============================================================
 
@@ -502,6 +602,8 @@ function getCommands() {
     { tag: "action", label: "New text block", run: () => { setActiveType("text"); noteTitle.focus(); } },
     { tag: "action", label: "New checklist block", run: () => { setActiveType("checklist"); noteTitle.focus(); } },
     { tag: "action", label: "New code block", run: () => { setActiveType("code"); noteTitle.focus(); } },
+    { tag: "api", label: "Insert random quote", run: insertRandomQuote },
+    { tag: "api", label: "Define a word", run: () => toggleDefineRow(true) },
     { tag: "action", label: "Focus search", run: () => searchInput.focus() },
     { tag: "action", label: "Toggle theme", run: () => themeToggle.click() },
     { tag: "action", label: "Export chain as JSON", run: exportJSON },
