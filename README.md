@@ -28,3 +28,7 @@ Practice project for:
 - Vanilla JavaScript and the DOM
 - localStorage
 - Basic Git and GitHub workflow
+
+- ## API Integrations
+- **Quotes API** (dummyjson.com) — inserts a random quote into the composer
+- **Dictionary API** (dictionaryapi.dev) — looks up any word and saves the definition as a note
